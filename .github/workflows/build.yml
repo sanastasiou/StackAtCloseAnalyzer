@@ -1,0 +1,127 @@
+name: Build Releases
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: StackAtCloseAnalyzer
+            asset_name: StackAtCloseAnalyzer-linux-x64
+          - os: windows-latest
+            artifact_name: StackAtCloseAnalyzer.exe
+            asset_name: StackAtCloseAnalyzer-windows-x64
+          - os: macos-latest
+            artifact_name: StackAtCloseAnalyzer
+            asset_name: StackAtCloseAnalyzer-macos-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller matplotlib numpy
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Build with PyInstaller
+        shell: bash
+        run: |
+          pyinstaller --onefile --windowed --name StackAtCloseAnalyzer \
+            --hidden-import=matplotlib.backends.backend_tkagg \
+            --hidden-import=PIL._tkinter_finder \
+            --exclude-module=pytest \
+            --exclude-module=sphinx \
+            --exclude-module=IPython \
+            --exclude-module=scapy \
+            StackAtCloseAnalyzer.py
+
+      - name: Create package directory
+        shell: bash
+        run: |
+          mkdir -p package
+          cp dist/${{ matrix.artifact_name }} package/
+          cp README.md package/
+          cp StackAtCloseAnalyzer.py package/
+
+      - name: Create zip (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd package
+          zip -r ../${{ matrix.asset_name }}.zip .
+
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path package\* -DestinationPath ${{ matrix.asset_name }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Delete old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get current tag
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          echo "Current tag: $CURRENT_TAG"
+
+          # Delete all releases except current
+          gh release list --repo ${{ github.repository }} --json tagName -q '.[].tagName' | while read tag; do
+            if [ "$tag" != "$CURRENT_TAG" ]; then
+              echo "Deleting release: $tag"
+              gh release delete "$tag" --repo ${{ github.repository }} -y || true
+              gh api repos/${{ github.repository }}/git/refs/tags/$tag -X DELETE || true
+            fi
+          done
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/StackAtCloseAnalyzer-linux-x64/StackAtCloseAnalyzer-linux-x64.zip
+            artifacts/StackAtCloseAnalyzer-windows-x64/StackAtCloseAnalyzer-windows-x64.zip
+            artifacts/StackAtCloseAnalyzer-macos-x64/StackAtCloseAnalyzer-macos-x64.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true

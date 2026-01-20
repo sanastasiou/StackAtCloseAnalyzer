@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.egg-info/
+
+# Generated files
+*.html
+build.log
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Distribution packages
+*-dist/
+*-Standalone/
+*.zip
+
+# Large data files
+*.pcapng
+*.pcap
